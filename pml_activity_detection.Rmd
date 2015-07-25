@@ -1,0 +1,104 @@
+---
+title: "Activity Recognition"
+author: "Michael Green"
+date: "July 25, 2015"
+output: html_document
+---
+
+##Summary
+This report describes building a machine learning classifier to predict how a subject is performing a specific weight lifting exercise. Data from accelerometers in the belt, forearm, arm, and dumbbell of six participants each performing a biceps curl exercise in five manners was used. More info is here: http://groupware.les.inf.puc-rio.br/har. Training and testing data sets were downloaded, the training set was split into a training a validation set, non-measurement data columns and NA values were removed, and k-fold cross validation was used to guage the accuracy of several predictor functions. The final model chosen was a quadratic discriminant analysis predictor, with an accuracy of 89 percent. This predictor model was then applied to the validation set and a confusion matrix was generated to display the errors. Finally, the model was applied to the test set and answers submitted. Nineteen of twenty results were predicted correctly. 
+ 
+ 
+##Data Exploration
+The following code downloads the training and testing data sets:
+
+```{r}
+#The caret library is necessary to implement machine learning functions
+library(caret)
+
+fileUrl1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+fileUrl2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+#download commands commented so not to run during compilation of rmarkdown #document
+#download.file(fileUrl1, destfile = "./pml-training.csv", method = "curl")
+#download.file(fileUrl2, destfile = "./pml-testing.csv", method = "curl")
+
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+```
+
+After initial examination of the data sets, I decided to remove all non-measurement data from the training set, as well as remove all columns with NA data. This NA data corresponds to average, maximums, minimums, etc, of a time series of the exercise performed, and will not be useful to classify the test data set as there is not enough data in the test set for time series calculations.
+
+```{r}
+#select measurement variables only
+train1 <- training[,8:160]
+
+#replace #DIV/0! with NA
+train1[train1 == "#DIV/0!"] <- NA
+#replace null values with NA
+train1[train1 == ""] <- NA
+
+#remove columns with NA values
+train1 <- train1[,colSums(is.na(train1)) == 0]
+```
+
+Then I separated the training set into training and validation sets.
+```{r}
+#separate training and validation sets
+set.seed(1234)
+inTrain <- createDataPartition(y=train1$classe, p = 0.75, list = FALSE)
+train1.train <- train1[inTrain,]
+train1.val <- train1[-inTrain,]
+```
+
+Additional exploration of the features remaining in the training set revealed little insight into relationships between the variables and the activity classification. I therefore chose to retain all the variables for predictor model creation.
+
+Pitch variables, color coded to activity classification:
+```{r}
+plot(train1.train[,grepl("^pitch", names(train1))], col = train1$classe)
+```
+
+Total acceleration variables, color coded to activity classification:
+```{r}
+plot(train1.train[,grepl("^total", names(train1))], col = train1$classe)
+```
+ 
+ 
+##Predictor Selection
+10-fold cross validation repeated 3 times was used to try several different predictor models. The following code creates the control variable that was used to train the models:
+```{r}
+#reset seed
+set.seed(1234)
+
+#set up control parameter to train with 10-fold cross validation in 3 repetitions
+control = trainControl(method = "repeatedcv", number = 10, repeats = 3)
+```
+
+A General Linear Model and State Vector Machine could not be used, because they only work for binomial classification. A tree predictor was attempted using rpart, with a resulting accuracy of only 50%. Internet research suggested a bagging or random forest model would yield better accuracies, however, the models exceeded the computing capacity of my old Toshiba laptop. A linear discriminant analysis model yielded better results, with a 70% accuracy. However, the best results I achieved were with a quadratic discriminat analysis model:
+```{r}
+modqda = train(classe ~., data = train1.train, preProcess = c("center", "scale"),
+               method="qda", trControl=control)
+modqda
+```
+As can be seen above, the accuracy is 89%, so the expect out of sample error rate is 11%. 
+
+
+##Validation
+To validate the chosen predictor, it was applied to the validation data set. Then a confusion matrix was generated to display the performance of the predictor.
+```{r}
+#validate predictor
+val_results <- predict(modqda, newdata = train1.val)
+#confidence
+confusionMatrix(table(train1.val$classe, val_results))
+```
+As can be seen above, the accuracy varies for each class of activity, but overall accuracy is about 90%. 
+
+
+##Testing
+Finally, the qda predictor was applied to the 20 samples in the test data.
+```{r}
+test1 <- testing[,names(testing) %in% names(train1)]
+results <- predict(modqda, newdata = test1)
+answers <- as.character(results)
+```
+Upon submission to the course website, one answer was incorrect, for an actual test accuracy rate of 95%, slightly better than expected.
